@@ -1,0 +1,27 @@
+name: Go
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: 1.25
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          args: run
+      - name: Format
+        uses: Jerome1337/gofmt-action@v1.0.5
+
+      - name: Run tests
+        run: go test -v ./...
