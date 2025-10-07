@@ -5,10 +5,12 @@ import (
 	"fmt"
 )
 
+// Resource represents any entity that can be accessed or modified
 type Resource interface {
 	Name() string
 }
 
+// BizRule defines a custom business rule for fine-grained authorization
 type BizRule interface {
 	Name() string
 	Evaluate(ctx context.Context, subjectID string, resource Resource) (bool, error)
