@@ -21,7 +21,6 @@ func (s *GormStore) migrate() error {
 		&Role{},
 		&Permission{},
 		&User{},
-		&Grant{},
 	)
 }
 
@@ -29,27 +28,20 @@ type Role struct {
 	ID          string       `gorm:"primaryKey"`
 	Name        string       `gorm:"uniqueIndex;not null"`
 	Description string       `gorm:"type:text"`
+	ParentID    string       `gorm:"index;constraint:OnDelete:RESTRICT"`
+	Parent      *Role        `gorm:"foreignKey:ParentID;references:ID"`
 	Permissions []Permission `gorm:"many2many:role_permissions;"`
-	Users       []User       `gorm:"many2many:user_roles;"`
 }
 
 type Permission struct {
 	ID       string `gorm:"primaryKey"`
 	Resource string `gorm:"not null;index:idx_resource_action"`
 	Action   string `gorm:"not null;index:idx_resource_action"`
+	BizRule  string `gorm:"type:text"`
 	Roles    []Role `gorm:"many2many:role_permissions;"`
 }
 
 type User struct {
-	ID     string  `gorm:"primaryKey"`
-	Roles  []Role  `gorm:"many2many:user_roles;"`
-	Grants []Grant `gorm:"foreignKey:UserID;constraint:OnDelete:CASCADE"`
-}
-
-type Grant struct {
-	ID         string `gorm:"primaryKey"`
-	UserID     string `gorm:"not null;index"`
-	Resource   string `gorm:"not null"`
-	Action     string `gorm:"not null"`
-	ResourceID string `gorm:"not null"`
+	ID     string `gorm:"primaryKey"`
+	RoleID string `gorm:"index"`
 }

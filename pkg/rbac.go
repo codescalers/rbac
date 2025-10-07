@@ -246,7 +246,7 @@ func (r *RBAC) checkRolePermission(ctx context.Context, role Role, subjectID, ac
 	var hasPermission bool
 	var permErr error
 
-	err := r.traverseRoleHierarchy(ctx, role.ID, func(currentRole Role) error {
+	err := r.traverseRoleHierarchy(ctx, role, func(currentRole Role) error {
 		for _, p := range currentRole.Permissions {
 			if p.Resource != resourceObj.Name() {
 				continue
