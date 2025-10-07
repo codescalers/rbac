@@ -16,14 +16,10 @@ type Store interface {
 	ListPermissions(ctx context.Context) ([]Permission, error)
 	RemovePermission(ctx context.Context, id string) error
 
-	// Subject role bindings
-	AssignRole(ctx context.Context, subjectID, roleID string) error
-	RevokeRole(ctx context.Context, subjectID, roleID string) error
+	// Subjects
+	GetSubject(ctx context.Context, subjectID string) (User, error)
+	UpdateSubject(ctx context.Context, user User) error
 	ListSubjects(ctx context.Context) ([]string, error)
 	ListSubjectRoles(ctx context.Context, subjectID string) ([]Role, error)
-
-	// Subject direct grants
-	GrantSubject(ctx context.Context, subjectID string, g Grant) error
-	RevokeSubjectGrant(ctx context.Context, subjectID string, grantID string) error
 	ListSubjectGrants(ctx context.Context, subjectID string) ([]Grant, error)
 }

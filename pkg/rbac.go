@@ -124,17 +124,24 @@ func (r *RBAC) AssignRole(ctx context.Context, subjectID, roleID string) error {
 		return ErrNotFound
 	}
 
-	roles, err := r.store.ListSubjectRoles(ctx, subjectID)
+	user, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return err
 	}
-	for _, role := range roles {
+
+	for _, role := range user.Roles {
 		if role.ID == roleID {
 			return ErrAlreadyExists
 		}
 	}
 
-	return r.store.AssignRole(ctx, subjectID, roleID)
+	role, err := r.store.GetRole(ctx, roleID)
+	if err != nil {
+		return err
+	}
+
+	user.Roles = append(user.Roles, role)
+	return r.store.UpdateSubject(ctx, user)
 }
 
 func (r *RBAC) RevokeRole(ctx context.Context, subjectID, roleID string) error {
@@ -142,12 +149,13 @@ func (r *RBAC) RevokeRole(ctx context.Context, subjectID, roleID string) error {
 		return err
 	}
 
-	roles, err := r.store.ListSubjectRoles(ctx, subjectID)
+	user, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return err
 	}
+
 	found := false
-	for _, role := range roles {
+	for _, role := range user.Roles {
 		if role.ID == roleID {
 			found = true
 			break
@@ -157,7 +165,8 @@ func (r *RBAC) RevokeRole(ctx context.Context, subjectID, roleID string) error {
 		return ErrNotFound
 	}
 
-	return r.store.RevokeRole(ctx, subjectID, roleID)
+	user.Roles = r.filterOutRole(user.Roles, roleID)
+	return r.store.UpdateSubject(ctx, user)
 }
 
 func (r *RBAC) AddPermissionToRole(ctx context.Context, roleID, permID string) error {
@@ -203,9 +212,17 @@ func (r *RBAC) GrantSubject(ctx context.Context, subjectID string, resource, act
 	if res == "" || act == "" {
 		return ErrInvalidResourceOrAction
 	}
+
+	user, err := r.store.GetSubject(ctx, subjectID)
+	if err != nil {
+		return err
+	}
+
 	rid := strings.ToLower(strings.TrimSpace(resourceID))
 	grant := Grant{ID: uuid.New().String(), Resource: res, Action: act, ResourceID: rid}
-	return r.store.GrantSubject(ctx, subjectID, grant)
+	user.Grants = append(user.Grants, grant)
+
+	return r.store.UpdateSubject(ctx, user)
 }
 
 func (r *RBAC) RevokeSubjectGrant(ctx context.Context, subjectID, grantID string) error {
@@ -213,12 +230,13 @@ func (r *RBAC) RevokeSubjectGrant(ctx context.Context, subjectID, grantID string
 		return err
 	}
 
-	grants, err := r.store.ListSubjectGrants(ctx, subjectID)
+	user, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return err
 	}
+
 	found := false
-	for _, grant := range grants {
+	for _, grant := range user.Grants {
 		if grant.ID == grantID {
 			found = true
 			break
@@ -228,15 +246,12 @@ func (r *RBAC) RevokeSubjectGrant(ctx context.Context, subjectID, grantID string
 		return ErrNotFound
 	}
 
-	return r.store.RevokeSubjectGrant(ctx, subjectID, grantID)
+	user.Grants = r.filterOutGrant(user.Grants, grantID)
+	return r.store.UpdateSubject(ctx, user)
 }
 
 func (r *RBAC) Can(ctx context.Context, subjectID, action, resource string, resourceID ...string) (bool, error) {
-	grants, err := r.store.ListSubjectGrants(ctx, subjectID)
-	if err != nil {
-		return false, err
-	}
-	roles, err := r.store.ListSubjectRoles(ctx, subjectID)
+	user, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return false, err
 	}
@@ -252,7 +267,7 @@ func (r *RBAC) Can(ctx context.Context, subjectID, action, resource string, reso
 	}
 
 	//direct grants
-	for _, g := range grants {
+	for _, g := range user.Grants {
 		if g.Resource != res {
 			continue
 		}
@@ -266,7 +281,7 @@ func (r *RBAC) Can(ctx context.Context, subjectID, action, resource string, reso
 	}
 
 	//role permissions
-	for _, role := range roles {
+	for _, role := range user.Roles {
 		for _, p := range role.Permissions {
 			if p.Resource != res {
 				continue
@@ -345,17 +360,37 @@ func (r *RBAC) isRoleInUse(ctx context.Context, roleID string) (bool, error) {
 		return false, err
 	}
 	for _, subjectID := range subjects {
-		roles, err := r.store.ListSubjectRoles(ctx, subjectID)
+		user, err := r.store.GetSubject(ctx, subjectID)
 		if err != nil {
-			return false, err
+			continue
 		}
-		for _, role := range roles {
+		for _, role := range user.Roles {
 			if role.ID == roleID {
 				return true, nil
 			}
 		}
 	}
 	return false, nil
+}
+
+func (r *RBAC) filterOutRole(roles []Role, roleID string) []Role {
+	filtered := roles[:0]
+	for _, role := range roles {
+		if role.ID != roleID {
+			filtered = append(filtered, role)
+		}
+	}
+	return filtered
+}
+
+func (r *RBAC) filterOutGrant(grants []Grant, grantID string) []Grant {
+	filtered := grants[:0]
+	for _, grant := range grants {
+		if grant.ID != grantID {
+			filtered = append(filtered, grant)
+		}
+	}
+	return filtered
 }
 
 func (r *RBAC) isPermissionInUse(ctx context.Context, permID string) (bool, error) {
