@@ -11,6 +11,7 @@ var (
 	ErrDuplicateRole           = errorString("role with this name already exists")
 	ErrDuplicatePermission     = errorString("permission with this resource and action already exists")
 	ErrRoleCycle               = errorString("role hierarchy cycle detected")
+	ErrRoleHasChildren         = errorString("role has child roles and cannot be removed")
 )
 
 type errorString string

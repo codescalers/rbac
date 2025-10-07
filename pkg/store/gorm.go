@@ -20,7 +20,7 @@ func (s *GormStore) migrate() error {
 	return s.db.AutoMigrate(
 		&Role{},
 		&Permission{},
-		&User{},
+		&Subject{},
 	)
 }
 
@@ -41,7 +41,7 @@ type Permission struct {
 	Roles    []Role `gorm:"many2many:role_permissions;"`
 }
 
-type User struct {
+type Subject struct {
 	ID     string `gorm:"primaryKey"`
 	RoleID string `gorm:"index"`
 }

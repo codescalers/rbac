@@ -18,7 +18,7 @@ type Store interface {
 	RemovePermission(ctx context.Context, id string) error
 
 	// Subjects
-	GetSubject(ctx context.Context, subjectID string) (User, error)
-	UpdateSubject(ctx context.Context, user User) error
+	GetSubject(ctx context.Context, subjectID string) (Subject, error)
+	UpdateSubject(ctx context.Context, subject Subject) error
 	ListSubjects(ctx context.Context) ([]string, error)
 }

@@ -41,11 +41,11 @@ func (r *RBAC) isRoleInUse(ctx context.Context, roleID string) (bool, error) {
 		return false, err
 	}
 	for _, subjectID := range subjects {
-		user, err := r.store.GetSubject(ctx, subjectID)
+		subject, err := r.store.GetSubject(ctx, subjectID)
 		if err != nil {
 			continue
 		}
-		if user.RoleID == roleID {
+		if subject.RoleID == roleID {
 			return true, nil
 		}
 	}

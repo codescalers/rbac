@@ -17,8 +17,8 @@ type Role struct {
 	Permissions []Permission `json:"permissions"`
 }
 
-// User represents a subject with a single assigned role
-type User struct {
+// Subject represents a subject with a single assigned role
+type Subject struct {
 	ID     string `json:"id"`
 	RoleID string `json:"role_id"`
 }

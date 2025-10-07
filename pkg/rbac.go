@@ -67,7 +67,8 @@ func (r *RBAC) CreateRole(ctx context.Context, name, description string, parentI
 			return Role{}, err
 		}
 
-		if err := r.checkRoleHierarchyCycle(ctx, parentID[0], role.ID); err != nil {
+		// Verify parent exists
+		if _, err := r.store.GetRole(ctx, parentID[0]); err != nil {
 			return Role{}, err
 		}
 
@@ -80,7 +81,37 @@ func (r *RBAC) CreateRole(ctx context.Context, name, description string, parentI
 	return role, nil
 }
 
-// RemoveRole deletes a role if it's not in use by any user
+// UpdateRole updates an existing role's parent, which can be used to reorganize the hierarchy
+func (r *RBAC) UpdateRole(ctx context.Context, roleID, newParentID string) error {
+	if err := validateUUIDs(roleID); err != nil {
+		return err
+	}
+
+	role, err := r.store.GetRole(ctx, roleID)
+	if err != nil {
+		return ErrNotFound
+	}
+
+	if newParentID != "" {
+		if err := validateUUIDs(newParentID); err != nil {
+			return err
+		}
+
+		_, err := r.store.GetRole(ctx, newParentID)
+		if err != nil {
+			return err
+		}
+
+		if err := r.checkRoleHierarchyCycle(ctx, newParentID, roleID); err != nil {
+			return err
+		}
+	}
+
+	role.ParentID = newParentID
+	return r.store.UpdateRole(ctx, role)
+}
+
+// RemoveRole deletes a role if it's not in use by any subject
 func (r *RBAC) RemoveRole(ctx context.Context, roleID string) error {
 	if err := validateUUIDs(roleID); err != nil {
 		return err
@@ -151,7 +182,7 @@ func (r *RBAC) RemovePermission(ctx context.Context, permID string) error {
 	return r.store.RemovePermission(ctx, permID)
 }
 
-// AssignRole assigns a role to a user
+// AssignRole assigns a role to a subject
 func (r *RBAC) AssignRole(ctx context.Context, subjectID, roleID string) error {
 	if err := validateUUIDs(roleID); err != nil {
 		return err
@@ -161,13 +192,13 @@ func (r *RBAC) AssignRole(ctx context.Context, subjectID, roleID string) error {
 		return ErrNotFound
 	}
 
-	user, err := r.store.GetSubject(ctx, subjectID)
+	subject, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return err
 	}
 
-	user.RoleID = roleID
-	return r.store.UpdateSubject(ctx, user)
+	subject.RoleID = roleID
+	return r.store.UpdateSubject(ctx, subject)
 }
 
 // AddPermissionToRole adds a permission to a role
@@ -208,9 +239,9 @@ func (r *RBAC) RemovePermissionFromRole(ctx context.Context, roleID, permID stri
 	return r.store.UpdateRole(ctx, role)
 }
 
-// Can checks if a user has permission to perform an action on a resource
+// Can checks if a subject has permission to perform an action on a resource
 func (r *RBAC) Can(ctx context.Context, subjectID, action string, resource Resource) (bool, error) {
-	user, err := r.store.GetSubject(ctx, subjectID)
+	subject, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return false, err
 	}
@@ -225,16 +256,16 @@ func (r *RBAC) Can(ctx context.Context, subjectID, action string, resource Resou
 		return false, ErrInvalidResourceOrAction
 	}
 
-	if user.RoleID == "" {
+	if subject.RoleID == "" {
 		return false, nil
 	}
 
 	// Validate roleID
-	if err := validateUUIDs(user.RoleID); err != nil {
+	if err := validateUUIDs(subject.RoleID); err != nil {
 		return false, err
 	}
 
-	role, err := r.store.GetRole(ctx, user.RoleID)
+	role, err := r.store.GetRole(ctx, subject.RoleID)
 	if err != nil {
 		return false, err
 	}
