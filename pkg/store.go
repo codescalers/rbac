@@ -21,5 +21,4 @@ type Store interface {
 	UpdateSubject(ctx context.Context, user User) error
 	ListSubjects(ctx context.Context) ([]string, error)
 	ListSubjectRoles(ctx context.Context, subjectID string) ([]Role, error)
-	ListSubjectGrants(ctx context.Context, subjectID string) ([]Grant, error)
 }

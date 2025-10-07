@@ -8,11 +8,15 @@ import (
 )
 
 type RBAC struct {
-	store Store
+	store    Store
+	bizRules map[string]BizRule
 }
 
 func New(ctx context.Context, s Store, opts ...Option) (*RBAC, error) {
-	r := &RBAC{store: s}
+	r := &RBAC{
+		store:    s,
+		bizRules: make(map[string]BizRule),
+	}
 	for _, opt := range opts {
 		if err := opt(ctx, r); err != nil {
 			return nil, err
@@ -205,79 +209,20 @@ func (r *RBAC) RemovePermissionFromRole(ctx context.Context, roleID, permID stri
 	return r.store.UpdateRole(ctx, role)
 }
 
-// Direct grants
-func (r *RBAC) GrantSubject(ctx context.Context, subjectID string, resource, action, resourceID string) error {
-	res := strings.ToLower(strings.TrimSpace(resource))
-	act := strings.ToLower(strings.TrimSpace(action))
-	if res == "" || act == "" {
-		return ErrInvalidResourceOrAction
-	}
-
-	user, err := r.store.GetSubject(ctx, subjectID)
-	if err != nil {
-		return err
-	}
-
-	rid := strings.ToLower(strings.TrimSpace(resourceID))
-	grant := Grant{ID: uuid.New().String(), Resource: res, Action: act, ResourceID: rid}
-	user.Grants = append(user.Grants, grant)
-
-	return r.store.UpdateSubject(ctx, user)
-}
-
-func (r *RBAC) RevokeSubjectGrant(ctx context.Context, subjectID, grantID string) error {
-	if err := validateUUIDs(grantID); err != nil {
-		return err
-	}
-
-	user, err := r.store.GetSubject(ctx, subjectID)
-	if err != nil {
-		return err
-	}
-
-	found := false
-	for _, grant := range user.Grants {
-		if grant.ID == grantID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return ErrNotFound
-	}
-
-	user.Grants = r.filterOutGrant(user.Grants, grantID)
-	return r.store.UpdateSubject(ctx, user)
-}
-
-func (r *RBAC) Can(ctx context.Context, subjectID, action, resource string, resourceID ...string) (bool, error) {
+func (r *RBAC) Can(ctx context.Context, subjectID, action string, resource Resource) (bool, error) {
 	user, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return false, err
 	}
 
-	id := ""
-	if len(resourceID) > 0 && resourceID[0] != "" {
-		id = resourceID[0]
-	}
-	res := strings.ToLower(strings.TrimSpace(resource))
-	act := strings.ToLower(strings.TrimSpace(action))
-	if res == "" || act == "" {
+	if resource == nil {
 		return false, ErrInvalidResourceOrAction
 	}
 
-	//direct grants
-	for _, g := range user.Grants {
-		if g.Resource != res {
-			continue
-		}
-		if g.Action != act {
-			continue
-		}
-		if g.ResourceID != id && g.ResourceID != "*" {
-			continue
-		}
-		return true, nil
+	res := strings.ToLower(strings.TrimSpace(resource.Name()))
+	act := strings.ToLower(strings.TrimSpace(action))
+	if res == "" || act == "" {
+		return false, ErrInvalidResourceOrAction
 	}
 
 	//role permissions
@@ -289,7 +234,23 @@ func (r *RBAC) Can(ctx context.Context, subjectID, action, resource string, reso
 			if p.Action != act {
 				continue
 			}
-			return true, nil
+
+			if p.BizRule == "" {
+				return true, nil
+			}
+
+			rule, exists := r.GetBizRule(p.BizRule)
+			if !exists {
+				continue
+			}
+
+			allowed, err := rule.Evaluate(ctx, subjectID, resource)
+			if err != nil {
+				return false, err
+			}
+			if allowed {
+				return true, nil
+			}
 		}
 	}
 
@@ -378,16 +339,6 @@ func (r *RBAC) filterOutRole(roles []Role, roleID string) []Role {
 	for _, role := range roles {
 		if role.ID != roleID {
 			filtered = append(filtered, role)
-		}
-	}
-	return filtered
-}
-
-func (r *RBAC) filterOutGrant(grants []Grant, grantID string) []Grant {
-	filtered := grants[:0]
-	for _, grant := range grants {
-		if grant.ID != grantID {
-			filtered = append(filtered, grant)
 		}
 	}
 	return filtered

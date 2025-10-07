@@ -4,6 +4,7 @@ type Permission struct {
 	ID       string `json:"id"`
 	Resource string `json:"resource"`
 	Action   string `json:"action"`
+	BizRule  string `json:"biz_rule,omitempty"`
 }
 
 type Role struct {
@@ -13,15 +14,7 @@ type Role struct {
 	Permissions []Permission `json:"permissions"`
 }
 
-type Grant struct {
-	ID         string `json:"id"`
-	Resource   string `json:"resource"`
-	ResourceID string `json:"resource_id"`
-	Action     string `json:"action"`
-}
-
 type User struct {
-	ID     string  `json:"id"`
-	Roles  []Role  `json:"roles"`
-	Grants []Grant `json:"grants"`
+	ID    string `json:"id"`
+	Roles []Role `json:"roles"`
 }
