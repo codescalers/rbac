@@ -19,6 +19,7 @@ type Store interface {
 	// Subject role bindings
 	AssignRole(ctx context.Context, subjectID, roleID string) error
 	RevokeRole(ctx context.Context, subjectID, roleID string) error
+	ListSubjects(ctx context.Context) ([]string, error)
 	ListSubjectRoles(ctx context.Context, subjectID string) ([]Role, error)
 
 	// Subject direct grants
