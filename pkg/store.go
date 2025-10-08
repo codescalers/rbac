@@ -1,0 +1,26 @@
+package rbac
+
+import "context"
+
+// Store defines the interface for persisting RBAC entities
+type Store interface {
+	// Roles
+	CreateRole(ctx context.Context, role Role) error
+	GetRole(ctx context.Context, roleID string) (Role, error)
+	GetRoleByName(ctx context.Context, name string) (Role, error)
+	UpdateRole(ctx context.Context, role Role) error
+	RemoveRole(ctx context.Context, roleID string) error
+	ListRoles(ctx context.Context) ([]Role, error)
+
+	// Permissions
+	CreatePermission(ctx context.Context, p Permission) error
+	GetPermission(ctx context.Context, id string) (Permission, error)
+	ListPermissions(ctx context.Context) ([]Permission, error)
+	RemovePermission(ctx context.Context, id string) error
+
+	// Subjects
+	CreateSubject(ctx context.Context, subject Subject) error
+	GetSubject(ctx context.Context, subjectID string) (Subject, error)
+	UpdateSubject(ctx context.Context, subject Subject) error
+	ListSubjects(ctx context.Context) ([]string, error)
+}
