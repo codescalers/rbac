@@ -69,6 +69,20 @@ func (mr *MockStoreMockRecorder) CreateRole(ctx, role any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateRole", reflect.TypeOf((*MockStore)(nil).CreateRole), ctx, role)
 }
 
+// CreateSubject mocks base method.
+func (m *MockStore) CreateSubject(ctx context.Context, subject rbac.Subject) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateSubject", ctx, subject)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CreateSubject indicates an expected call of CreateSubject.
+func (mr *MockStoreMockRecorder) CreateSubject(ctx, subject any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateSubject", reflect.TypeOf((*MockStore)(nil).CreateSubject), ctx, subject)
+}
+
 // GetPermission mocks base method.
 func (m *MockStore) GetPermission(ctx context.Context, id string) (rbac.Permission, error) {
 	m.ctrl.T.Helper()
@@ -97,6 +111,21 @@ func (m *MockStore) GetRole(ctx context.Context, roleID string) (rbac.Role, erro
 func (mr *MockStoreMockRecorder) GetRole(ctx, roleID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRole", reflect.TypeOf((*MockStore)(nil).GetRole), ctx, roleID)
+}
+
+// GetRoleByName mocks base method.
+func (m *MockStore) GetRoleByName(ctx context.Context, name string) (rbac.Role, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetRoleByName", ctx, name)
+	ret0, _ := ret[0].(rbac.Role)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetRoleByName indicates an expected call of GetRoleByName.
+func (mr *MockStoreMockRecorder) GetRoleByName(ctx, name any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRoleByName", reflect.TypeOf((*MockStore)(nil).GetRoleByName), ctx, name)
 }
 
 // GetSubject mocks base method.

@@ -152,6 +152,18 @@ func TestUpdateRole(t *testing.T) {
 	existingEditor := rbac.Role{ID: editorID, Name: "editor", ParentID: adminID}
 	existingViewer := rbac.Role{ID: viewerID, Name: "viewer", ParentID: editorID}
 
+	store.EXPECT().GetRoleByName(ctx, gomock.Any()).DoAndReturn(func(ctx context.Context, name string) (rbac.Role, error) {
+		switch name {
+		case "admin":
+			return existingAdmin, nil
+		case "editor":
+			return existingEditor, nil
+		case "viewer":
+			return existingViewer, nil
+		default:
+			return rbac.Role{}, rbac.ErrNotFound
+		}
+	}).AnyTimes()
 	store.EXPECT().GetRole(ctx, gomock.Any()).DoAndReturn(func(ctx context.Context, id string) (rbac.Role, error) {
 		switch id {
 		case adminID:
@@ -172,51 +184,39 @@ func TestUpdateRole(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		roleID         string
-		newParentID    string
+		roleName       string
+		newParentName  string
 		expectedError  error
 		expectAnyError bool
 	}{
 		{
-			name:           "Update role with invalid UUID",
-			roleID:         "invalid-uuid",
-			newParentID:    adminID,
-			expectAnyError: true,
-		},
-		{
 			name:          "Update non-existing role",
-			roleID:        "550e8400-e29b-41d4-a716-446655440099",
-			newParentID:   adminID,
+			roleName:      "nonexistent",
+			newParentName: "admin",
 			expectedError: rbac.ErrNotFound,
 		},
 		{
-			name:           "Update role with invalid parent UUID",
-			roleID:         viewerID,
-			newParentID:    "invalid-parent-uuid",
-			expectAnyError: true,
-		},
-		{
 			name:          "Update role with non-existing parent",
-			roleID:        viewerID,
-			newParentID:   "550e8400-e29b-41d4-a716-446655440099",
+			roleName:      "viewer",
+			newParentName: "nonexistent",
 			expectedError: rbac.ErrNotFound,
 		},
 		{
 			name:          "Update role creates cycle",
-			roleID:        adminID,
-			newParentID:   editorID,
+			roleName:      "admin",
+			newParentName: "editor",
 			expectedError: rbac.ErrRoleCycle,
 		},
 		{
-			name:        "Update role successfully",
-			roleID:      viewerID,
-			newParentID: adminID,
+			name:          "Update role successfully",
+			roleName:      "viewer",
+			newParentName: "admin",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := r.UpdateRole(ctx, tt.roleID, tt.newParentID)
+			err := r.UpdateRole(ctx, tt.roleName, tt.newParentName)
 
 			if tt.expectedError == nil && !tt.expectAnyError {
 				assert.NoError(t, err)
@@ -238,10 +238,11 @@ func TestRemoveRole(t *testing.T) {
 	ctx := context.Background()
 	store := mocks.NewMockStore(ctrl)
 
+	roleName := "user"
 	roleID := "550e8400-e29b-41d4-a716-446655440000"
 
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{ID: roleID, Name: "user"}, nil).Times(3)
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{ID: roleID, Name: roleName}, nil).Times(3)
 	store.EXPECT().ListSubjects(ctx).Return([]string{"user1", "user2"}, nil).Times(3)
 	store.EXPECT().GetSubject(ctx, "user1").Return(rbac.Subject{ID: "user1", RoleID: "some-other-role"}, nil).Times(3)
 	store.EXPECT().GetSubject(ctx, "user2").Return(rbac.Subject{ID: "user2", RoleID: roleID}, nil).Times(1)
@@ -255,39 +256,34 @@ func TestRemoveRole(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		roleID         string
+		roleName       string
 		expectedError  error
 		expectAnyError bool
 	}{
 		{
-			name:           "Remove role with invalid UUID",
-			roleID:         "invalid-uuid",
-			expectAnyError: true,
-		},
-		{
 			name:          "Remove non-existing role",
-			roleID:        roleID,
+			roleName:      roleName,
 			expectedError: rbac.ErrNotFound,
 		},
 		{
 			name:          "Remove role that is in use",
-			roleID:        roleID,
+			roleName:      roleName,
 			expectedError: rbac.ErrRoleInUse,
 		},
 		{
 			name:          "Remove role that has children",
-			roleID:        roleID,
+			roleName:      roleName,
 			expectedError: rbac.ErrRoleHasChildren,
 		},
 		{
-			name:   "Remove role successfully",
-			roleID: roleID,
+			name:     "Remove role successfully",
+			roleName: roleName,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := r.RemoveRole(ctx, tt.roleID)
+			err := r.RemoveRole(ctx, tt.roleName)
 
 			if tt.expectedError == nil && !tt.expectAnyError {
 				assert.NoError(t, err)
@@ -472,22 +468,22 @@ func TestAddPermissionToRole(t *testing.T) {
 	ctx := context.Background()
 	store := mocks.NewMockStore(ctrl)
 
-	roleID := "550e8400-e29b-41d4-a716-446655440000"
+	roleName := "editor"
 	permID := "550e8400-e29b-41d4-a716-446655440001"
 	existingPermID := "550e8400-e29b-41d4-a716-446655440002"
 
 	existingPerm := rbac.Permission{ID: existingPermID, Resource: "blog", Action: "read"}
 	newPerm := rbac.Permission{ID: permID, Resource: "article", Action: "write"}
 
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{
-		ID:          roleID,
-		Name:        "editor",
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{
+		ID:          "550e8400-e29b-41d4-a716-446655440000",
+		Name:        roleName,
 		Permissions: []rbac.Permission{existingPerm},
 	}, nil).Times(1)
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{
-		ID:          roleID,
-		Name:        "editor",
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{
+		ID:          "550e8400-e29b-41d4-a716-446655440000",
+		Name:        roleName,
 		Permissions: []rbac.Permission{},
 	}, nil).Times(2)
 	store.EXPECT().GetPermission(ctx, permID).Return(rbac.Permission{}, rbac.ErrNotFound).Times(1)
@@ -500,51 +496,45 @@ func TestAddPermissionToRole(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		roleID         string
+		roleName       string
 		permID         string
 		expectedError  error
 		expectAnyError bool
 	}{
 		{
-			name:           "Add permission with invalid role UUID",
-			roleID:         "invalid-uuid",
-			permID:         permID,
-			expectAnyError: true,
-		},
-		{
 			name:           "Add permission with invalid permission UUID",
-			roleID:         roleID,
+			roleName:       roleName,
 			permID:         "invalid-uuid",
 			expectAnyError: true,
 		},
 		{
 			name:          "Add permission to non-existing role",
-			roleID:        roleID,
+			roleName:      roleName,
 			permID:        permID,
 			expectedError: rbac.ErrNotFound,
 		},
 		{
 			name:          "Add duplicate permission to role",
-			roleID:        roleID,
+			roleName:      roleName,
 			permID:        existingPermID,
 			expectedError: rbac.ErrAlreadyExists,
 		},
 		{
 			name:          "Add non-existing permission to role",
-			roleID:        roleID,
+			roleName:      roleName,
 			permID:        permID,
 			expectedError: rbac.ErrNotFound,
 		},
 		{
-			name:   "Add permission to role successfully",
-			roleID: roleID,
-			permID: permID,
+			name:     "Add permission to role successfully",
+			roleName: roleName,
+			permID:   permID,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := r.AddPermissionToRole(ctx, tt.roleID, tt.permID)
+			err := r.AddPermissionToRole(ctx, tt.roleName, tt.permID)
 
 			if tt.expectedError == nil && !tt.expectAnyError {
 				assert.NoError(t, err)
@@ -566,21 +556,22 @@ func TestRemovePermissionFromRole(t *testing.T) {
 	ctx := context.Background()
 	store := mocks.NewMockStore(ctrl)
 
+	roleName := "editor"
 	roleID := "550e8400-e29b-41d4-a716-446655440000"
 	permID := "550e8400-e29b-41d4-a716-446655440001"
 	otherPermID := "550e8400-e29b-41d4-a716-446655440002"
 
 	existingPerm := rbac.Permission{ID: permID, Resource: "blog", Action: "read"}
 
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{
 		ID:          roleID,
-		Name:        "editor",
+		Name:        roleName,
 		Permissions: []rbac.Permission{},
 	}, nil).Times(1)
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{
 		ID:          roleID,
-		Name:        "editor",
+		Name:        roleName,
 		Permissions: []rbac.Permission{existingPerm},
 	}, nil).Times(1)
 	store.EXPECT().UpdateRole(ctx, gomock.Any()).Return(nil).Times(1)
@@ -591,45 +582,39 @@ func TestRemovePermissionFromRole(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		roleID         string
+		roleName       string
 		permID         string
 		expectedError  error
 		expectAnyError bool
 	}{
 		{
-			name:           "Remove permission with invalid role UUID",
-			roleID:         "invalid-uuid",
-			permID:         permID,
-			expectAnyError: true,
-		},
-		{
 			name:           "Remove permission with invalid permission UUID",
-			roleID:         roleID,
+			roleName:       roleName,
 			permID:         "invalid-uuid",
 			expectAnyError: true,
 		},
 		{
 			name:          "Remove permission from non-existing role",
-			roleID:        roleID,
+			roleName:      roleName,
 			permID:        permID,
 			expectedError: rbac.ErrNotFound,
 		},
 		{
 			name:          "Remove non-existing permission from role",
-			roleID:        roleID,
+			roleName:      roleName,
 			permID:        otherPermID,
 			expectedError: rbac.ErrNotFound,
 		},
 		{
-			name:   "Remove permission from role successfully",
-			roleID: roleID,
-			permID: permID,
+			name:     "Remove permission from role successfully",
+			roleName: roleName,
+			permID:   permID,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := r.RemovePermissionFromRole(ctx, tt.roleID, tt.permID)
+			err := r.RemovePermissionFromRole(ctx, tt.roleName, tt.permID)
 
 			if tt.expectedError == nil && !tt.expectAnyError {
 				assert.NoError(t, err)
@@ -651,13 +636,14 @@ func TestAssignRole(t *testing.T) {
 	ctx := context.Background()
 	store := mocks.NewMockStore(ctrl)
 
+	roleName := "admin"
 	roleID := "550e8400-e29b-41d4-a716-446655440000"
 	subjectID := "subject-123"
 
 	existingSubject := rbac.Subject{ID: subjectID, RoleID: ""}
 
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
-	store.EXPECT().GetRole(ctx, roleID).Return(rbac.Role{ID: roleID, Name: "admin"}, nil).Times(2)
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
+	store.EXPECT().GetRoleByName(ctx, roleName).Return(rbac.Role{ID: roleID, Name: roleName}, nil).Times(2)
 	store.EXPECT().GetSubject(ctx, subjectID).Return(rbac.Subject{}, rbac.ErrNotFound).Times(1)
 	store.EXPECT().GetSubject(ctx, subjectID).Return(existingSubject, nil).Times(1)
 	store.EXPECT().UpdateSubject(ctx, rbac.Subject{ID: subjectID, RoleID: roleID}).Return(nil).Times(1)
@@ -669,38 +655,32 @@ func TestAssignRole(t *testing.T) {
 	tests := []struct {
 		name           string
 		subjectID      string
-		roleID         string
+		roleName       string
 		expectedError  error
 		expectAnyError bool
 	}{
 		{
-			name:           "Assign role with invalid role UUID",
-			subjectID:      subjectID,
-			roleID:         "invalid-uuid",
-			expectAnyError: true,
-		},
-		{
 			name:          "Assign non-existing role",
 			subjectID:     subjectID,
-			roleID:        roleID,
+			roleName:      roleName,
 			expectedError: rbac.ErrNotFound,
 		},
 		{
 			name:           "Assign role to non-existing subject",
 			subjectID:      subjectID,
-			roleID:         roleID,
+			roleName:       roleName,
 			expectAnyError: true,
 		},
 		{
 			name:      "Assign role successfully",
 			subjectID: subjectID,
-			roleID:    roleID,
+			roleName:  roleName,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := r.AssignRole(ctx, tt.subjectID, tt.roleID)
+			err := r.AssignRole(ctx, tt.subjectID, tt.roleName)
 
 			if tt.expectedError == nil && !tt.expectAnyError {
 				assert.NoError(t, err)

@@ -108,24 +108,24 @@ func main() {
 	fmt.Printf("Created roles: user=%s, admin=%s\n", userRole.ID, adminRole.ID)
 
 	//Add user permissions
-	if err := r.AddPermissionToRole(ctx, userRole.ID, readPerm.ID); err != nil {
+	if err := r.AddPermissionToRole(ctx, "user", readPerm.ID); err != nil {
 		log.Fatal(err)
 	}
-	if err := r.AddPermissionToRole(ctx, userRole.ID, createPerm.ID); err != nil {
+	if err := r.AddPermissionToRole(ctx, "user", createPerm.ID); err != nil {
 		log.Fatal(err)
 	}
-	if err := r.AddPermissionToRole(ctx, userRole.ID, updateOwnPerm.ID); err != nil {
+	if err := r.AddPermissionToRole(ctx, "user", updateOwnPerm.ID); err != nil {
 		log.Fatal(err)
 	}
-	if err := r.AddPermissionToRole(ctx, userRole.ID, deleteOwnPerm.ID); err != nil {
+	if err := r.AddPermissionToRole(ctx, "user", deleteOwnPerm.ID); err != nil {
 		log.Fatal(err)
 	}
 
 	//Add admin permissions
-	if err := r.AddPermissionToRole(ctx, adminRole.ID, updateAll.ID); err != nil {
+	if err := r.AddPermissionToRole(ctx, "admin", updateAll.ID); err != nil {
 		log.Fatal(err)
 	}
-	if err := r.AddPermissionToRole(ctx, adminRole.ID, deleteAll.ID); err != nil {
+	if err := r.AddPermissionToRole(ctx, "admin", deleteAll.ID); err != nil {
 		log.Fatal(err)
 	}
 
@@ -133,16 +133,15 @@ func main() {
 	adminUserID := "admin-user-123"
 	regularUserID := "regular-user-456"
 
-	// Assign roles
-	if err := r.AssignRole(ctx, adminUserID, adminRole.ID); err != nil {
+	// Create subjects with roles using role names
+	if err := r.CreateSubjectWithRole(ctx, adminUserID, "admin"); err != nil {
 		log.Fatal(err)
 	}
-	if err := r.AssignRole(ctx, regularUserID, userRole.ID); err != nil {
+	if err := r.CreateSubjectWithRole(ctx, regularUserID, "user"); err != nil {
 		log.Fatal(err)
 	}
 
-	// Test scenarios
-	fmt.Println("\n=== Testing RBAC with Business Rules ===\n")
+	fmt.Println("Created subjects with roles")
 
 	// Test blogs
 	blog1 := Blog{ID: "blog-1", Title: "Admin's Blog", OwnerID: adminUserID}

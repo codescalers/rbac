@@ -82,46 +82,38 @@ func (r *RBAC) CreateRole(ctx context.Context, name, description string, parentI
 }
 
 // UpdateRole updates an existing role's parent, which can be used to reorganize the hierarchy
-func (r *RBAC) UpdateRole(ctx context.Context, roleID, newParentID string) error {
-	if err := validateUUIDs(roleID); err != nil {
-		return err
-	}
-
-	role, err := r.store.GetRole(ctx, roleID)
+func (r *RBAC) UpdateRole(ctx context.Context, roleName, newParentName string) error {
+	role, err := r.store.GetRoleByName(ctx, roleName)
 	if err != nil {
 		return ErrNotFound
 	}
 
-	if newParentID != "" {
-		if err := validateUUIDs(newParentID); err != nil {
-			return err
-		}
-
-		_, err := r.store.GetRole(ctx, newParentID)
+	if newParentName != "" {
+		parent, err := r.store.GetRoleByName(ctx, newParentName)
 		if err != nil {
+			return ErrNotFound
+		}
+
+		if err := r.checkRoleHierarchyCycle(ctx, parent.ID, role.ID); err != nil {
 			return err
 		}
 
-		if err := r.checkRoleHierarchyCycle(ctx, newParentID, roleID); err != nil {
-			return err
-		}
+		role.ParentID = parent.ID
+	} else {
+		role.ParentID = ""
 	}
 
-	role.ParentID = newParentID
 	return r.store.UpdateRole(ctx, role)
 }
 
 // RemoveRole deletes a role if it's not in use by any subject
-func (r *RBAC) RemoveRole(ctx context.Context, roleID string) error {
-	if err := validateUUIDs(roleID); err != nil {
-		return err
-	}
-
-	if _, err := r.store.GetRole(ctx, roleID); err != nil {
+func (r *RBAC) RemoveRole(ctx context.Context, roleName string) error {
+	role, err := r.store.GetRoleByName(ctx, roleName)
+	if err != nil {
 		return ErrNotFound
 	}
 
-	inUse, err := r.isRoleInUse(ctx, roleID)
+	inUse, err := r.isRoleInUse(ctx, role.ID)
 	if err != nil {
 		return err
 	}
@@ -129,7 +121,7 @@ func (r *RBAC) RemoveRole(ctx context.Context, roleID string) error {
 		return ErrRoleInUse
 	}
 
-	return r.store.RemoveRole(ctx, roleID)
+	return r.store.RemoveRole(ctx, role.ID)
 }
 
 // CreatePermission creates a new permission with optional business rule
@@ -182,13 +174,24 @@ func (r *RBAC) RemovePermission(ctx context.Context, permID string) error {
 	return r.store.RemovePermission(ctx, permID)
 }
 
-// AssignRole assigns a role to a subject
-func (r *RBAC) AssignRole(ctx context.Context, subjectID, roleID string) error {
-	if err := validateUUIDs(roleID); err != nil {
-		return err
+// CreateSubjectWithRole creates a new subject and assigns a role by role name
+func (r *RBAC) CreateSubjectWithRole(ctx context.Context, subjectID, roleName string) error {
+	role, err := r.store.GetRoleByName(ctx, roleName)
+	if err != nil {
+		return ErrNotFound
 	}
 
-	if _, err := r.store.GetRole(ctx, roleID); err != nil {
+	subject := Subject{
+		ID:     subjectID,
+		RoleID: role.ID,
+	}
+	return r.store.CreateSubject(ctx, subject)
+}
+
+// AssignRole assigns a role to a subject
+func (r *RBAC) AssignRole(ctx context.Context, subjectID, roleName string) error {
+	role, err := r.store.GetRoleByName(ctx, roleName)
+	if err != nil {
 		return ErrNotFound
 	}
 
@@ -197,16 +200,16 @@ func (r *RBAC) AssignRole(ctx context.Context, subjectID, roleID string) error {
 		return err
 	}
 
-	subject.RoleID = roleID
+	subject.RoleID = role.ID
 	return r.store.UpdateSubject(ctx, subject)
 }
 
 // AddPermissionToRole adds a permission to a role
-func (r *RBAC) AddPermissionToRole(ctx context.Context, roleID, permID string) error {
-	if err := validateUUIDs(roleID, permID); err != nil {
+func (r *RBAC) AddPermissionToRole(ctx context.Context, roleName, permID string) error {
+	if err := validateUUIDs(permID); err != nil {
 		return err
 	}
-	role, err := r.store.GetRole(ctx, roleID)
+	role, err := r.store.GetRoleByName(ctx, roleName)
 	if err != nil {
 		return ErrNotFound
 	}
@@ -222,11 +225,11 @@ func (r *RBAC) AddPermissionToRole(ctx context.Context, roleID, permID string) e
 }
 
 // RemovePermissionFromRole removes a permission from a role
-func (r *RBAC) RemovePermissionFromRole(ctx context.Context, roleID, permID string) error {
-	if err := validateUUIDs(roleID, permID); err != nil {
+func (r *RBAC) RemovePermissionFromRole(ctx context.Context, roleName, permID string) error {
+	if err := validateUUIDs(permID); err != nil {
 		return err
 	}
-	role, err := r.store.GetRole(ctx, roleID)
+	role, err := r.store.GetRoleByName(ctx, roleName)
 	if err != nil {
 		return ErrNotFound
 	}
