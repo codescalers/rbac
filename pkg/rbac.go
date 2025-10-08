@@ -2,17 +2,22 @@ package rbac
 
 import (
 	"context"
-	"strings"
 
 	"github.com/google/uuid"
 )
 
+// RBAC is the main role-based access control manager
 type RBAC struct {
-	store Store
+	store    Store
+	bizRules map[string]BizRule
 }
 
-func New(ctx context.Context, s Store, opts ...Option) (*RBAC, error) {
-	r := &RBAC{store: s}
+// NewRBAC creates a new RBAC instance with the given store and optional configuration
+func NewRBAC(ctx context.Context, s Store, opts ...Option) (*RBAC, error) {
+	r := &RBAC{
+		store:    s,
+		bizRules: make(map[string]BizRule),
+	}
 	for _, opt := range opts {
 		if err := opt(ctx, r); err != nil {
 			return nil, err
@@ -21,8 +26,10 @@ func New(ctx context.Context, s Store, opts ...Option) (*RBAC, error) {
 	return r, nil
 }
 
+// Option is a function that configures the RBAC instance during initialization
 type Option func(ctx context.Context, r *RBAC) error
 
+// WithSeed seeds the RBAC system with predefined roles
 func WithSeed(roles []Role) Option {
 	return func(ctx context.Context, r *RBAC) error {
 		return r.initFromSeed(ctx, roles)
@@ -38,34 +45,75 @@ func (r *RBAC) initFromSeed(ctx context.Context, roles []Role) error {
 	return nil
 }
 
-func (r *RBAC) CreateRole(ctx context.Context, name, description string) error {
-	n := strings.ToLower(strings.TrimSpace(name))
+// CreateRole creates a new role with optional parent for hierarchy
+func (r *RBAC) CreateRole(ctx context.Context, name, description string, parentID ...string) (Role, error) {
+	n := normalizeString(name)
 	if n == "" {
-		return ErrInvalidName
+		return Role{}, ErrInvalidName
 	}
 
 	exists, err := r.roleNameExists(ctx, n)
 	if err != nil {
-		return err
+		return Role{}, err
 	}
 	if exists {
-		return ErrDuplicateRole
+		return Role{}, ErrDuplicateRole
 	}
 
 	role := Role{ID: uuid.New().String(), Name: n, Description: description}
-	return r.store.CreateRole(ctx, role)
-}
 
-func (r *RBAC) RemoveRole(ctx context.Context, roleID string) error {
-	if err := validateUUIDs(roleID); err != nil {
-		return err
+	if len(parentID) > 0 && parentID[0] != "" {
+		if err := validateUUIDs(parentID[0]); err != nil {
+			return Role{}, err
+		}
+
+		// Verify parent exists
+		if _, err := r.store.GetRole(ctx, parentID[0]); err != nil {
+			return Role{}, err
+		}
+
+		role.ParentID = parentID[0]
 	}
 
-	if _, err := r.store.GetRole(ctx, roleID); err != nil {
+	if err := r.store.CreateRole(ctx, role); err != nil {
+		return Role{}, err
+	}
+	return role, nil
+}
+
+// UpdateRole updates an existing role's parent, which can be used to reorganize the hierarchy
+func (r *RBAC) UpdateRole(ctx context.Context, roleName, newParentName string) error {
+	role, err := r.store.GetRoleByName(ctx, roleName)
+	if err != nil {
 		return ErrNotFound
 	}
 
-	inUse, err := r.isRoleInUse(ctx, roleID)
+	if newParentName != "" {
+		parent, err := r.store.GetRoleByName(ctx, newParentName)
+		if err != nil {
+			return ErrNotFound
+		}
+
+		if err := r.checkRoleHierarchyCycle(ctx, parent.ID, role.ID); err != nil {
+			return err
+		}
+
+		role.ParentID = parent.ID
+	} else {
+		role.ParentID = ""
+	}
+
+	return r.store.UpdateRole(ctx, role)
+}
+
+// RemoveRole deletes a role if it's not in use by any subject
+func (r *RBAC) RemoveRole(ctx context.Context, roleName string) error {
+	role, err := r.store.GetRoleByName(ctx, roleName)
+	if err != nil {
+		return ErrNotFound
+	}
+
+	inUse, err := r.isRoleInUse(ctx, role.ID)
 	if err != nil {
 		return err
 	}
@@ -73,28 +121,39 @@ func (r *RBAC) RemoveRole(ctx context.Context, roleID string) error {
 		return ErrRoleInUse
 	}
 
-	return r.store.RemoveRole(ctx, roleID)
+	return r.store.RemoveRole(ctx, role.ID)
 }
 
-func (r *RBAC) CreatePermission(ctx context.Context, resource, action string) error {
-	res := strings.ToLower(strings.TrimSpace(resource))
-	a := strings.ToLower(strings.TrimSpace(action))
+// CreatePermission creates a new permission with optional business rule
+func (r *RBAC) CreatePermission(ctx context.Context, resource, action string, bizRuleName ...string) (Permission, error) {
+	res := normalizeString(resource)
+	a := normalizeString(action)
 	if res == "" || a == "" {
-		return ErrInvalidResourceOrAction
+		return Permission{}, ErrInvalidResourceOrAction
 	}
 
-	exists, err := r.permissionExists(ctx, res, a)
+	bizRule := ""
+	if len(bizRuleName) > 0 && bizRuleName[0] != "" {
+		bizRule = bizRuleName[0]
+	}
+
+	exists, err := r.permissionExists(ctx, res, a, bizRule)
 	if err != nil {
-		return err
+		return Permission{}, err
 	}
 	if exists {
-		return ErrDuplicatePermission
+		return Permission{}, ErrDuplicatePermission
 	}
 
-	p := Permission{ID: uuid.New().String(), Resource: res, Action: a}
-	return r.store.CreatePermission(ctx, p)
+	p := Permission{ID: uuid.New().String(), Resource: res, Action: a, BizRule: bizRule}
+
+	if err := r.store.CreatePermission(ctx, p); err != nil {
+		return Permission{}, err
+	}
+	return p, nil
 }
 
+// RemovePermission deletes a permission if it's not assigned to any role
 func (r *RBAC) RemovePermission(ctx context.Context, permID string) error {
 	if err := validateUUIDs(permID); err != nil {
 		return err
@@ -115,69 +174,46 @@ func (r *RBAC) RemovePermission(ctx context.Context, permID string) error {
 	return r.store.RemovePermission(ctx, permID)
 }
 
-func (r *RBAC) AssignRole(ctx context.Context, subjectID, roleID string) error {
-	if err := validateUUIDs(roleID); err != nil {
-		return err
-	}
-
-	if _, err := r.store.GetRole(ctx, roleID); err != nil {
+// CreateSubjectWithRole creates a new subject and assigns a role by role name
+func (r *RBAC) CreateSubjectWithRole(ctx context.Context, subjectID, roleName string) error {
+	role, err := r.store.GetRoleByName(ctx, roleName)
+	if err != nil {
 		return ErrNotFound
 	}
 
-	user, err := r.store.GetSubject(ctx, subjectID)
-	if err != nil {
-		return err
+	subject := Subject{
+		ID:     subjectID,
+		RoleID: role.ID,
 	}
-
-	for _, role := range user.Roles {
-		if role.ID == roleID {
-			return ErrAlreadyExists
-		}
-	}
-
-	role, err := r.store.GetRole(ctx, roleID)
-	if err != nil {
-		return err
-	}
-
-	user.Roles = append(user.Roles, role)
-	return r.store.UpdateSubject(ctx, user)
+	return r.store.CreateSubject(ctx, subject)
 }
 
-func (r *RBAC) RevokeRole(ctx context.Context, subjectID, roleID string) error {
-	if err := validateUUIDs(roleID); err != nil {
-		return err
+// AssignRole assigns a role to a subject
+func (r *RBAC) AssignRole(ctx context.Context, subjectID, roleName string) error {
+	role, err := r.store.GetRoleByName(ctx, roleName)
+	if err != nil {
+		return ErrNotFound
 	}
 
-	user, err := r.store.GetSubject(ctx, subjectID)
+	subject, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return err
 	}
 
-	found := false
-	for _, role := range user.Roles {
-		if role.ID == roleID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return ErrNotFound
-	}
-
-	user.Roles = r.filterOutRole(user.Roles, roleID)
-	return r.store.UpdateSubject(ctx, user)
+	subject.RoleID = role.ID
+	return r.store.UpdateSubject(ctx, subject)
 }
 
-func (r *RBAC) AddPermissionToRole(ctx context.Context, roleID, permID string) error {
-	if err := validateUUIDs(roleID, permID); err != nil {
+// AddPermissionToRole adds a permission to a role
+func (r *RBAC) AddPermissionToRole(ctx context.Context, roleName, permID string) error {
+	if err := validateUUIDs(permID); err != nil {
 		return err
 	}
-	role, err := r.store.GetRole(ctx, roleID)
+	role, err := r.store.GetRoleByName(ctx, roleName)
 	if err != nil {
 		return ErrNotFound
 	}
-	if r.roleHasPermission(&role, permID) {
+	if roleHasPermission(&role, permID) {
 		return ErrAlreadyExists
 	}
 	p, err := r.store.GetPermission(ctx, permID)
@@ -188,222 +224,103 @@ func (r *RBAC) AddPermissionToRole(ctx context.Context, roleID, permID string) e
 	return r.store.UpdateRole(ctx, role)
 }
 
-func (r *RBAC) RemovePermissionFromRole(ctx context.Context, roleID, permID string) error {
-	if err := validateUUIDs(roleID, permID); err != nil {
+// RemovePermissionFromRole removes a permission from a role
+func (r *RBAC) RemovePermissionFromRole(ctx context.Context, roleName, permID string) error {
+	if err := validateUUIDs(permID); err != nil {
 		return err
 	}
-	role, err := r.store.GetRole(ctx, roleID)
+	role, err := r.store.GetRoleByName(ctx, roleName)
 	if err != nil {
 		return ErrNotFound
 	}
 
-	if !r.roleHasPermission(&role, permID) {
+	if !roleHasPermission(&role, permID) {
 		return ErrNotFound
 	}
 
-	role.Permissions = r.filterOutPermission(role.Permissions, permID)
+	role.Permissions = filterOutPermission(role.Permissions, permID)
 	return r.store.UpdateRole(ctx, role)
 }
 
-// Direct grants
-func (r *RBAC) GrantSubject(ctx context.Context, subjectID string, resource, action, resourceID string) error {
-	res := strings.ToLower(strings.TrimSpace(resource))
-	act := strings.ToLower(strings.TrimSpace(action))
-	if res == "" || act == "" {
-		return ErrInvalidResourceOrAction
-	}
-
-	user, err := r.store.GetSubject(ctx, subjectID)
-	if err != nil {
-		return err
-	}
-
-	rid := strings.ToLower(strings.TrimSpace(resourceID))
-	grant := Grant{ID: uuid.New().String(), Resource: res, Action: act, ResourceID: rid}
-	user.Grants = append(user.Grants, grant)
-
-	return r.store.UpdateSubject(ctx, user)
-}
-
-func (r *RBAC) RevokeSubjectGrant(ctx context.Context, subjectID, grantID string) error {
-	if err := validateUUIDs(grantID); err != nil {
-		return err
-	}
-
-	user, err := r.store.GetSubject(ctx, subjectID)
-	if err != nil {
-		return err
-	}
-
-	found := false
-	for _, grant := range user.Grants {
-		if grant.ID == grantID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return ErrNotFound
-	}
-
-	user.Grants = r.filterOutGrant(user.Grants, grantID)
-	return r.store.UpdateSubject(ctx, user)
-}
-
-func (r *RBAC) Can(ctx context.Context, subjectID, action, resource string, resourceID ...string) (bool, error) {
-	user, err := r.store.GetSubject(ctx, subjectID)
+// Can checks if a subject has permission to perform an action on a resource
+func (r *RBAC) Can(ctx context.Context, subjectID, action string, resource Resource) (bool, error) {
+	subject, err := r.store.GetSubject(ctx, subjectID)
 	if err != nil {
 		return false, err
 	}
 
-	id := ""
-	if len(resourceID) > 0 && resourceID[0] != "" {
-		id = resourceID[0]
+	if resource == nil {
+		return false, ErrInvalidResourceOrAction
 	}
-	res := strings.ToLower(strings.TrimSpace(resource))
-	act := strings.ToLower(strings.TrimSpace(action))
+
+	res := normalizeString(resource.Name())
+	act := normalizeString(action)
 	if res == "" || act == "" {
 		return false, ErrInvalidResourceOrAction
 	}
 
-	//direct grants
-	for _, g := range user.Grants {
-		if g.Resource != res {
-			continue
-		}
-		if g.Action != act {
-			continue
-		}
-		if g.ResourceID != id && g.ResourceID != "*" {
-			continue
-		}
-		return true, nil
+	if subject.RoleID == "" {
+		return false, nil
 	}
 
-	//role permissions
-	for _, role := range user.Roles {
-		for _, p := range role.Permissions {
-			if p.Resource != res {
+	// Validate roleID
+	if err := validateUUIDs(subject.RoleID); err != nil {
+		return false, err
+	}
+
+	role, err := r.store.GetRole(ctx, subject.RoleID)
+	if err != nil {
+		return false, err
+	}
+
+	return r.checkRolePermission(ctx, role, subjectID, act, resource)
+}
+
+func (r *RBAC) checkRolePermission(ctx context.Context, role Role, subjectID, action string, resourceObj Resource) (bool, error) {
+	var hasPermission bool
+	var permErr error
+
+	err := r.traverseRoleHierarchy(ctx, role, func(currentRole Role) error {
+		for _, p := range currentRole.Permissions {
+			if p.Resource != resourceObj.Name() {
 				continue
 			}
-			if p.Action != act {
+			if p.Action != action {
 				continue
 			}
-			return true, nil
-		}
-	}
 
-	return false, nil
-}
-
-func (r *RBAC) roleHasPermission(role *Role, permID string) bool {
-	for _, p := range role.Permissions {
-		if p.ID == permID {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *RBAC) filterOutPermission(perms []Permission, permID string) []Permission {
-	filtered := perms[:0]
-	for _, p := range perms {
-		if p.ID != permID {
-			filtered = append(filtered, p)
-		}
-	}
-	return filtered
-}
-
-func validateUUIDs(ids ...string) error {
-	for _, id := range ids {
-		if _, err := uuid.Parse(id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *RBAC) roleNameExists(ctx context.Context, name string) (bool, error) {
-	roles, err := r.store.ListRoles(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, role := range roles {
-		if role.Name == name {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func (r *RBAC) permissionExists(ctx context.Context, resource, action string) (bool, error) {
-	perms, err := r.store.ListPermissions(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, p := range perms {
-		if p.Resource != resource {
-			continue
-		}
-		if p.Action != action {
-			continue
-		}
-		return true, nil
-	}
-	return false, nil
-}
-
-func (r *RBAC) isRoleInUse(ctx context.Context, roleID string) (bool, error) {
-	subjects, err := r.store.ListSubjects(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, subjectID := range subjects {
-		user, err := r.store.GetSubject(ctx, subjectID)
-		if err != nil {
-			continue
-		}
-		for _, role := range user.Roles {
-			if role.ID == roleID {
-				return true, nil
+			if p.BizRule == "" {
+				hasPermission = true
+				return nil
 			}
-		}
-	}
-	return false, nil
-}
 
-func (r *RBAC) filterOutRole(roles []Role, roleID string) []Role {
-	filtered := roles[:0]
-	for _, role := range roles {
-		if role.ID != roleID {
-			filtered = append(filtered, role)
-		}
-	}
-	return filtered
-}
+			rule, exists := r.GetBizRule(p.BizRule)
+			if !exists {
+				continue
+			}
 
-func (r *RBAC) filterOutGrant(grants []Grant, grantID string) []Grant {
-	filtered := grants[:0]
-	for _, grant := range grants {
-		if grant.ID != grantID {
-			filtered = append(filtered, grant)
-		}
-	}
-	return filtered
-}
+			allowed, err := rule.Evaluate(ctx, subjectID, resourceObj)
+			if err != nil {
+				permErr = err
+				return err
+			}
 
-func (r *RBAC) isPermissionInUse(ctx context.Context, permID string) (bool, error) {
-	roles, err := r.store.ListRoles(ctx)
+			if !allowed {
+				continue
+			}
+
+			hasPermission = true
+			return nil
+		}
+		return nil
+	})
+
 	if err != nil {
+		if permErr != nil {
+			return false, permErr
+		}
 		return false, err
 	}
-	for _, role := range roles {
-		for _, p := range role.Permissions {
-			if p.ID == permID {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+
+	return hasPermission, nil
 }
