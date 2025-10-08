@@ -46,7 +46,7 @@ func (r *RBAC) initFromSeed(ctx context.Context, roles []Role) error {
 }
 
 // CreateRole creates a new role with optional parent for hierarchy
-func (r *RBAC) CreateRole(ctx context.Context, name, description string, parentID ...string) (Role, error) {
+func (r *RBAC) CreateRole(ctx context.Context, name, description string, parentName ...string) (Role, error) {
 	n := normalizeString(name)
 	if n == "" {
 		return Role{}, ErrInvalidName
@@ -62,17 +62,14 @@ func (r *RBAC) CreateRole(ctx context.Context, name, description string, parentI
 
 	role := Role{ID: uuid.New().String(), Name: n, Description: description}
 
-	if len(parentID) > 0 && parentID[0] != "" {
-		if err := validateUUIDs(parentID[0]); err != nil {
-			return Role{}, err
+	if len(parentName) > 0 && parentName[0] != "" {
+		// Get parent role by name
+		parent, err := r.store.GetRoleByName(ctx, parentName[0])
+		if err != nil {
+			return Role{}, ErrNotFound
 		}
 
-		// Verify parent exists
-		if _, err := r.store.GetRole(ctx, parentID[0]); err != nil {
-			return Role{}, err
-		}
-
-		role.ParentID = parentID[0]
+		role.ParentID = parent.ID
 	}
 
 	if err := r.store.CreateRole(ctx, role); err != nil {

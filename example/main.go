@@ -100,7 +100,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	adminRole, err := r.CreateRole(ctx, "admin", "Administrator with full access", userRole.ID)
+	adminRole, err := r.CreateRole(ctx, "admin", "Administrator with full access", "user")
 	if err != nil {
 		log.Fatal(err)
 	}

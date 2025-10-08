@@ -51,15 +51,15 @@ func TestCreateRole(t *testing.T) {
 	existingAdmin := rbac.Role{ID: adminID, Name: "admin"}
 
 	store.EXPECT().ListRoles(ctx).Return([]rbac.Role{existingAdmin}, nil).Times(4)
-	store.EXPECT().GetRole(ctx, adminID).Return(rbac.Role{ID: adminID, Name: "admin"}, nil).Times(1)
+	store.EXPECT().GetRoleByName(ctx, "admin").Return(rbac.Role{ID: adminID, Name: "admin"}, nil).Times(1)
+	store.EXPECT().GetRoleByName(ctx, "nonexistent").Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
 	store.EXPECT().CreateRole(ctx, gomock.Any()).Return(nil).Times(2)
 
 	tests := []struct {
 		name          string
 		roleName      string
 		description   string
-		parentID      string
-		setupMock     func()
+		parentName    string
 		expectedError error
 		validateRole  func(role rbac.Role)
 	}{
@@ -76,13 +76,10 @@ func TestCreateRole(t *testing.T) {
 			expectedError: rbac.ErrDuplicateRole,
 		},
 		{
-			name:        "Create role with non-existing parent",
-			roleName:    "user",
-			description: "description",
-			parentID:    "660e8400-e29b-41d4-a716-446655440099",
-			setupMock: func() {
-				store.EXPECT().GetRole(ctx, "660e8400-e29b-41d4-a716-446655440099").Return(rbac.Role{}, rbac.ErrNotFound).Times(1)
-			},
+			name:          "Create role with non-existing parent",
+			roleName:      "user",
+			description:   "description",
+			parentName:    "nonexistent",
 			expectedError: rbac.ErrNotFound,
 		},
 		{
@@ -98,7 +95,7 @@ func TestCreateRole(t *testing.T) {
 			name:        "Create role successfully with parent",
 			roleName:    "editor",
 			description: "Editor role",
-			parentID:    adminID,
+			parentName:  "admin",
 			validateRole: func(role rbac.Role) {
 				assert.Equal(t, "editor", role.Name)
 				assert.Equal(t, "Editor role", role.Description)
@@ -109,14 +106,10 @@ func TestCreateRole(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.setupMock != nil {
-				tt.setupMock()
-			}
-
 			var role rbac.Role
 			var err error
-			if tt.parentID != "" {
-				role, err = r.CreateRole(ctx, tt.roleName, tt.description, tt.parentID)
+			if tt.parentName != "" {
+				role, err = r.CreateRole(ctx, tt.roleName, tt.description, tt.parentName)
 			} else {
 				role, err = r.CreateRole(ctx, tt.roleName, tt.description)
 			}
